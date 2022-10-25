@@ -82,35 +82,40 @@ void AnnotateCvStage::Configure()
 
 bool AnnotateCvStage::Process(CompletedRequestPtr &completed_request)
 {
-	libcamera::Span<uint8_t> buffer = app_->Mmap(completed_request->buffers[stream_])[0];
-	FrameInfo info(completed_request->metadata);
-	info.sequence = completed_request->sequence;
+	auto timestamp = completed_request->metadata.get(libcamera::controls::SensorTimestamp);
+    if (timestamp)
+    {
+        // *timestamp should be the timestamp in nanoseconds
+		libcamera::Span<uint8_t> buffer = app_->Mmap(completed_request->buffers[stream_])[0];
+		FrameInfo info(completed_request->metadata);
+		info.sequence = completed_request->sequence;
 
-	// Other post-processing stages can supply metadata to update the text.
-	completed_request->post_process_metadata.Get("annotate.text", text_);
-	std::string text = info.ToString(text_);
-	char text_with_date[256];
-	time_t t = time(NULL);
-	tm *tm_ptr = localtime(&t);
-	if (strftime(text_with_date, sizeof(text_with_date), text.c_str(), tm_ptr) != 0)
-		text = std::string(text_with_date);
+		// Other post-processing stages can supply metadata to update the text.
+		completed_request->post_process_metadata.Get("annotate.text", text_);
+		std::string text = info.ToString(text_);
+		char text_with_date[256];
+		time_t t = time(NULL);
+		tm *tm_ptr = timestamp
+		if (strftime(text_with_date, sizeof(text_with_date), text.c_str(), tm_ptr) != 0)
+			text = std::string(text_with_date);
 
-	uint8_t *ptr = (uint8_t *)buffer.data();
-	Mat im(info_.height, info_.width, CV_8U, ptr, info_.stride);
-	int font = FONT_HERSHEY_SIMPLEX;
+		uint8_t *ptr = (uint8_t *)buffer.data();
+		Mat im(info_.height, info_.width, CV_8U, ptr, info_.stride);
+		int font = FONT_HERSHEY_SIMPLEX;
 
-	int baseline = 0;
-	Size size = getTextSize(text, font, adjusted_scale_, adjusted_thickness_, &baseline);
+		int baseline = 0;
+		Size size = getTextSize(text, font, adjusted_scale_, adjusted_thickness_, &baseline);
 
-	// Can't find a handy "draw rectangle with alpha" function...
-	for (int y = 0; y < size.height + baseline; y++, ptr += info_.stride)
-	{
-		for (int x = 0; x < size.width; x++)
-			ptr[x] = bg_ * alpha_ + (1 - alpha_) * ptr[x];
+		// Can't find a handy "draw rectangle with alpha" function...
+		for (int y = 0; y < size.height + baseline; y++, ptr += info_.stride)
+		{
+			for (int x = 0; x < size.width; x++)
+				ptr[x] = bg_ * alpha_ + (1 - alpha_) * ptr[x];
+		}
+		putText(im, text, Point(0, size.height), font, adjusted_scale_, fg_, adjusted_thickness_, 0);
+
+		return false;
 	}
-	putText(im, text, Point(0, size.height), font, adjusted_scale_, fg_, adjusted_thickness_, 0);
-
-	return false;
 }
 
 static PostProcessingStage *Create(LibcameraApp *app)
